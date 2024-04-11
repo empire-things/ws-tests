@@ -1,27 +1,24 @@
-import { Client, Collection, GatewayIntentBits, Partials, ActivityType } from "discord.js";
+import { Client, GatewayIntentBits, Partials, ActivityType } from "discord.js";
 import { getEventRanking, login } from "./lib/functions.js";
 import { sendSms, sendCall } from "./lib/sms-call.js";
 import { getTimeString } from "./lib/time.js";
 import { getUnits } from "./lib/getData.js";
 import { players } from "./data/players.js";
 import { sanitize } from "./lib/string.js";
+import { config } from "./data/config.ts";
 import { server } from "./lib/server.js";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import WebSocket from "ws";
-import "dotenv/config";
 
-const username = process.env.USERNAMEE;
+const username = process.env.NAME;
 const password = process.env.PASSWORD;
-const discordToken = process.env.CLIENT_TOKEN;
-const useDiscordBot = false;
 
 const chatUrl = process.env.CHAT_URL;
 const attacksUrl = process.env.ATTACKS_URL;
-const rankingsUrl = process.env.RANKINGS_URL;
 
-if (!username || !password || !discordToken) {
-    throw new Error("Missing environment variables.");
+if (!username || !password) {
+    throw new Error("Username or password not provided in .env file.");
 }
 
 let soldiers, tools;
@@ -510,7 +507,7 @@ function connect() {
             const sender = content["CM"]["PN"];
             const message = sanitize(content["CM"]["MT"]);
 
-            if (sender === "Vroom") return;
+            if (sender === username) return;
 
             // Date must be the current date in France
             const date = new Intl.DateTimeFormat("fr-FR", {
@@ -594,73 +591,51 @@ function pingSocket() {
     }
 }
 
-const clientOptions = {
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildPresences,
-        GatewayIntentBits.GuildVoiceStates,
-    ],
-    presence: {
-        status: "online",
-        activities: [
-            {
-                name: "Goodgame Empire",
-                type: ActivityType.Playing,
-            },
+export let client: null | Client<boolean> = null;
+
+if (config.useDiscordBot) {
+    const discordToken = process.env.DISCORD_CLIENT_TOKEN;
+
+    const clientOptions = {
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.DirectMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildPresences,
+            GatewayIntentBits.GuildVoiceStates,
         ],
-    },
-    partials: [Partials.Channel],
-};
+        presence: {
+            status: "online",
+            activities: [
+                {
+                    name: "Goodgame Empire",
+                    type: ActivityType.Playing,
+                },
+            ],
+        },
+        partials: [Partials.Channel],
+    };
 
-export const client = new Client(clientOptions);
+    // @ts-ignore
+    client = new Client(clientOptions);
 
-// Events
-const eventsPath = join(process.cwd(), "events");
-const eventFiles = readdirSync(eventsPath).filter(
-    (file) => file.endsWith(".js") || file.endsWith(".ts")
-);
-
-for (const file of eventFiles) {
-    const url = `file:///${join(eventsPath, file)}`;
-    const eventFile = await import(url);
-
-    if (eventFile.once) {
-        client.once(eventFile.name, (...args) => eventFile.execute(...args));
-    } else if (eventFile.once === false) {
-        client.on(eventFile.name, (...args) => eventFile.execute(...args));
-    }
-}
-
-// Commands
-client.commands = new Collection();
-client.cooldowns = new Collection();
-
-const foldersPath = join(process.cwd(), "commands");
-const commandFolders = readdirSync(foldersPath);
-
-for (const folder of commandFolders) {
-    const commandsPath = join(foldersPath, folder);
-    const commandFiles = readdirSync(commandsPath).filter(
+    // Events
+    const eventsPath = join(process.cwd(), "events");
+    const eventFiles = readdirSync(eventsPath).filter(
         (file) => file.endsWith(".js") || file.endsWith(".ts")
     );
 
-    for (const file of commandFiles) {
-        const url = `file:///${join(commandsPath, file)}`;
-        const commandFile = await import(url);
+    for (const file of eventFiles) {
+        const url = `file:///${join(eventsPath, file)}`;
+        const eventFile = await import(url);
 
-        if (commandFile.data && commandFile.execute) {
-            client.commands.set(commandFile.data.name, commandFile);
-        } else {
-            console.log(
-                `[WARNING] The command at ${url} is missing a required "data" or "execute" property.`
-            );
+        if (eventFile.once) {
+            client.once(eventFile.name, (...args) => eventFile.execute(...args));
+        } else if (eventFile.once === false) {
+            client.on(eventFile.name, (...args) => eventFile.execute(...args));
         }
     }
-}
 
-if (useDiscordBot) {
     client.login(discordToken);
 }
